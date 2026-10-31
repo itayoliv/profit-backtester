@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "profit-backtester"
+version = "0.1.0"
+description = "Agent-driven backtesting harness with smart Alpaca caching and dual engines"
+requires-python = ">=3.11"
+dependencies = [
+    "alpaca-py==0.44.0",
+    "backtesting==0.6.6",
+    "filelock==4.2.6",
+    "numpy==2.5.4",
+    "pandas==3.1.0",
+    "pyarrow==26.0.0",
+    "pydantic==2.14.2",
+    "python-dotenv==1.2.4",
+    "rich==15.0.0",
+    "typer==0.27.3",
+    "vectorbt==1.2.0",
+]
+
+[project.optional-dependencies]
+gui = ["streamlit==1.66.1"]
+dev = ["pytest==9.2.0"]
+
+[project.scripts]
+bt = "backtester.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["backtester*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["slow: end-to-end runs that spin up worker subprocesses"]

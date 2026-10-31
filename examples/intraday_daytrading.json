@@ -1,0 +1,29 @@
+{
+  "source": "agent",
+  "tickers": ["SPY"],
+  "timeframe": "1Hour",
+  "start": "2024-01-01",
+  "end": "2024-07-01",
+  "strategy": "sma_cross",
+  "params": {"fast": 4, "slow": 12},
+  "engine": "backtesting",
+  "capital": {
+    "initial_cash": 50000,
+    "sizing": "percent_equity",
+    "size_value": 0.5,
+    "commission": 0.0005,
+    "slippage_bps": 10,
+    "allow_short": false
+  },
+  "rules": {"max_trades_per_day": 2, "no_overnight": true},
+  "filters": {
+    "weekdays": [0, 1, 2, 3],
+    "regime": {
+      "symbol": "SPY",
+      "timeframe": "1Day",
+      "indicator": "sma",
+      "period": 200,
+      "condition": "above"
+    }
+  }
+}

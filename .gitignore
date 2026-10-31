@@ -1,0 +1,20 @@
+# Local GUI (git-ignored by design: monitoring surface, not part of the core repo)
+gui/
+
+# Runtime data: cache, job queue, state, results
+workspace/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

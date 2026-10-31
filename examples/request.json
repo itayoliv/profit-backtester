@@ -1,0 +1,20 @@
+{
+  "source": "agent",
+  "tickers": ["AAPL", "MSFT"],
+  "timeframe": "1Day",
+  "start": "2023-01-01",
+  "end": "2024-01-01",
+  "strategy": "sma_cross",
+  "params": {"fast": 10, "slow": 50},
+  "engine": "vectorbt",
+  "capital": {
+    "initial_cash": 100000,
+    "sizing": "percent_equity",
+    "size_value": 1.0,
+    "commission": 0.0,
+    "slippage_bps": 5,
+    "allow_short": false
+  },
+  "rules": {"max_trades_per_day": null, "no_overnight": false},
+  "filters": {"weekdays": null, "regime": null}
+}
