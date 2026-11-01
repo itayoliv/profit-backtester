@@ -28,6 +28,13 @@ def _num(value: Any, digits: int = 3) -> str:
         return "n/a"
 
 
+def _author(summary: dict[str, Any]) -> str:
+    origin = summary.get("strategy_origin") or {}
+    if origin.get("origin") == "builtin":
+        return "built in"
+    return origin.get("author") or "n/a"
+
+
 def _table(rows: Iterable[tuple[str, Any]]) -> list[str]:
     lines = ["| field | value |", "| --- | --- |"]
     lines += [f"| {name} | {value} |" for name, value in rows]
@@ -93,7 +100,9 @@ class ResultWriter:
             [
                 ("tickers", ", ".join(summary.get("tickers") or []) or "n/a"),
                 ("strategy", summary.get("strategy")),
+                ("written by", _author(summary)),
                 ("params", summary.get("params")),
+                *([("params_grid", summary["params_grid"])] if summary.get("params_grid") else []),
                 ("engine", summary.get("engine")),
                 ("timeframe", coverage.get("timeframe", "n/a")),
                 ("window", f"{coverage.get('requested_start', '?')} to {coverage.get('requested_end', '?')}"),
@@ -102,6 +111,10 @@ class ResultWriter:
                 ("commission", capital.get("commission")),
                 ("slippage", f"{capital.get('slippage_bps')} bps"),
                 ("shorting", "enabled" if capital.get("allow_short") else "disabled"),
+                (
+                    "fractional shares",
+                    "enabled" if capital.get("allow_fractional") else "disabled",
+                ),
             ]
         )
         lines.append("")
@@ -118,7 +131,23 @@ class ResultWriter:
         )
         lines.append("")
 
-        if children:
+        comparison = summary.get("comparison") or {}
+        if children and comparison.get("rows"):
+            varied = [v.removeprefix("params.") for v in comparison.get("varied", []) if v.startswith("params.")]
+            lines += [
+                f"Per-run results, best {comparison.get('sort_by', 'sharpe')} first:",
+                "",
+                "| rank | ticker | params | total_return | sharpe | max_drawdown | trades |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+            for item in comparison["rows"][: MAX_REPORT_LINES // 4]:
+                shown = {k: v for k, v in item["params"].items() if k in varied} or "-"
+                lines.append(
+                    f"| {item['rank']} | {item['ticker']} | {shown} | {_pct(item['total_return'])} "
+                    f"| {_num(item['sharpe'])} | {_pct(item['max_drawdown'])} | {item['trade_count']} |"
+                )
+            lines.append("")
+        elif children:
             lines += ["Per-ticker results:", "", "| ticker | total_return | sharpe | trades |", "| --- | --- | --- | --- |"]
             for child in children[: MAX_REPORT_LINES // 4]:
                 lines.append(

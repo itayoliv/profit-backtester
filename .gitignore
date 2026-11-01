@@ -1,5 +1,10 @@
 # Local GUI (git-ignored by design: monitoring surface, not part of the core repo)
 gui/
+.streamlit/
+
+# Agent scratch and installed custom strategies
+drafts/
+custom_strategies/
 
 # Runtime data: cache, job queue, state, results
 workspace/

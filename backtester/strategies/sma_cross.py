@@ -11,7 +11,11 @@ from .registry import register
 
 class SmaCrossParams(StrategyParams):
     fast: int = Field(default=10, ge=1, le=1000)
+    """Bars in the short simple moving average of the close. Smaller reacts sooner and
+    trades more often. Must be strictly less than slow."""
     slow: int = Field(default=50, ge=2, le=2000)
+    """Bars in the long simple moving average of the close. Larger follows only long
+    trends, trades less, and needs this many bars before the first signal."""
 
     @model_validator(mode="after")
     def _fast_below_slow(self) -> "SmaCrossParams":
@@ -22,6 +26,10 @@ class SmaCrossParams(StrategyParams):
 
 class SmaCross(BaseStrategy):
     name = "sma_cross"
+    description = (
+        "Long only. Buys at the close of the bar where the fast SMA crosses above the "
+        "slow SMA, and sells at the close of the bar where it crosses back below."
+    )
     Params = SmaCrossParams
 
     def generate_signals(self, df: pd.DataFrame, params: SmaCrossParams) -> Signals:

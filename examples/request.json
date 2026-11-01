@@ -12,7 +12,7 @@
     "sizing": "percent_equity",
     "size_value": 1.0,
     "commission": 0.0,
-    "slippage_bps": 5,
+    "slippage_bps": 1,
     "allow_short": false
   },
   "rules": {"max_trades_per_day": null, "no_overnight": false},

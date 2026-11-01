@@ -92,6 +92,12 @@ class JobQueue:
     def running_ids(self) -> list[str]:
         return [p.stem for p in self.settings.running_dir.glob("*.json")]
 
+    def has_work(self) -> bool:
+        """True while any job is waiting or not yet finished, parents included."""
+        return any(self.settings.inbox_dir.glob("*.json")) or any(
+            self.settings.running_dir.glob("*.json")
+        )
+
     def locate(self, job_id: str) -> Path | None:
         for directory in (
             self.settings.inbox_dir,

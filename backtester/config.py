@@ -152,6 +152,13 @@ def load_settings(workspace: Path | str | None = None) -> Settings:
     )
 
 
+def custom_strategies_dir() -> Path:
+    """Where ``bt add-strategy`` keeps agent-written strategies. ``BT_STRATEGIES_DIR`` overrides."""
+    load_dotenv(REPO_ROOT / ".env", override=False)
+    raw = os.environ.get("BT_STRATEGIES_DIR")
+    return Path(raw).resolve() if raw else REPO_ROOT / "custom_strategies"
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return load_settings()

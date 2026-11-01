@@ -18,6 +18,7 @@ from ..jsonio import iso, utcnow
 from ..logging import get_logger, setup_logging
 from ..pipeline.pipeline import Pipeline
 from ..pipeline.request import BacktestRequest
+from ..reporting.compare import compare
 from ..reporting.writer import ResultWriter
 from .queue import JobQueue
 from .state import StateStore
@@ -134,7 +135,9 @@ class Worker:
 
                 busy = claimed or self._futures
                 idle = 0 if busy else idle + 1
-                if once and not busy:
+                # A pass can claim nothing because the pool was full and then harvest it
+                # empty, while children still wait in the inbox or a parent is still open.
+                if once and not busy and not self.queue.has_work():
                     break
                 if max_idle_polls is not None and idle >= max_idle_polls:
                     break
@@ -264,10 +267,19 @@ class Worker:
 
         request = self.queue.load_request(job_id)
         aggregate = _aggregate(job_id, request, summaries, failed)
-        notes = [f"{len(succeeded)} of {len(children)} tickers completed."]
+        notes = [f"{len(succeeded)} of {len(children)} runs completed."]
+        if request is not None and request.params_grid is not None:
+            notes.append(
+                "Parameter sweep: the headline metrics average runs with different "
+                "parameters. Compare runs with the per-run table or `bt compare`."
+            )
+            notes += [
+                f"skipped {s['params']}: {s['reason']}" for s in request.skipped_combinations()
+            ]
         notes += [
             f"{(c.get('error') or {}).get('code', 'failed')}: {c.get('job_id')}" for c in failed
         ]
+        notes += aggregate["comparison"]["warnings"]
         self.writer.write(job_id, aggregate, notes=notes)
 
         all_failed = not succeeded
@@ -301,13 +313,21 @@ def _aggregate(
         return round(sum(values) / len(values), 6) if values else 0.0
 
     coverage = summaries[0].get("data_coverage", {}) if summaries else {}
+    sweep = request is not None and request.params_grid is not None
+    # A sweep's children each carry different params; the parent keeps the shared base.
+    if request is not None and (sweep or not summaries):
+        params = request.params
+    else:
+        params = summaries[0].get("params", {}) if summaries else {}
     return {
         "job_id": job_id,
         "parent_job_id": None,
         "tickers": request.tickers if request else [s["tickers"][0] for s in summaries],
         "strategy": request.strategy if request else (summaries[0].get("strategy") if summaries else None),
+        "strategy_origin": summaries[0].get("strategy_origin") if summaries else None,
         "engine": request.engine if request else (summaries[0].get("engine") if summaries else None),
-        "params": summaries[0].get("params", {}) if summaries else (request.params if request else {}),
+        "params": params,
+        "params_grid": request.params_grid if request else None,
         "rules": request.rules.model_dump() if request else (summaries[0].get("rules") if summaries else {}),
         "filters": request.filters.model_dump() if request else {},
         "capital": request.capital.model_dump() if request else {},
@@ -327,6 +347,7 @@ def _aggregate(
         "trade_count": sum(int(s.get("trade_count") or 0) for s in summaries),
         "rule_violations": sum(int(s.get("rule_violations") or 0) for s in summaries),
         "children": summaries,
+        "comparison": compare(summaries),
         "failed_children": [
             {"job_id": c.get("job_id"), "error": c.get("error")} for c in failed
         ],

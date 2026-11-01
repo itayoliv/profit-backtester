@@ -86,7 +86,15 @@ def submit(
         emit({"error": "validation_error", "details": exc.details})
         raise typer.Exit(EXIT_VALIDATION) from None
 
-    emit({"job_id": job_id, "tickers": request.tickers, "children": len(request.tickers)})
+    out: dict[str, Any] = {
+        "job_id": job_id,
+        "tickers": request.tickers,
+        "children": len(request.children()) if request.is_batch else 1,
+    }
+    if request.params_grid is not None:
+        out["param_sets"] = len(request.param_sets())
+        out["skipped_combinations"] = request.skipped_combinations()
+    emit(out)
 
 
 @app.command()
@@ -196,17 +204,99 @@ def fetch(
 
 @app.command()
 def strategies(workspace: str = typer.Option(None, "--workspace")) -> None:
-    """List registered strategies and their parameter schemas."""
-    from .strategies.registry import list_strategies
+    """List registered strategies, who wrote each, what they do, and what each parameter means."""
+    from .strategies.custom import load_custom
+    from .strategies.registry import list_strategies, strategy_origin
 
+    custom = load_custom()
     emit(
         {
             "strategies": [
-                {"name": name, "params_schema": strategy.params_schema()}
+                {**strategy.describe(), **(strategy_origin(name) or {})}
                 for name, strategy in list_strategies().items()
-            ]
+            ],
+            "load_errors": [{"name": n, "error": e} for n, e in sorted(custom.errors.items())],
+            "unregistered_files": custom.unregistered_files,
         }
     )
+
+
+@app.command("add-strategy")
+def add_strategy(
+    file: str = typer.Argument(..., help="Python file that defines and register()s one strategy."),
+    author: str = typer.Option(..., "--author", help="Who wrote it, e.g. grok. Recorded and shown everywhere the strategy is used."),
+    replace: bool = typer.Option(False, "--replace", help="Overwrite a custom strategy with the same name."),
+) -> None:
+    """Check a strategy file and install it, attributed to --author. Exit 2 if a check fails."""
+    from .strategies.custom import StrategyCheckError
+    from .strategies.custom import add_strategy as install
+
+    try:
+        emit(install(Path(file), author, replace=replace))
+    except StrategyCheckError as exc:
+        emit({"error": "validation_error", "details": exc.details})
+        raise typer.Exit(EXIT_VALIDATION) from None
+
+
+@app.command("remove-strategy")
+def remove_strategy(name: str = typer.Argument(...)) -> None:
+    """Uninstall a strategy added with add-strategy. Built-ins cannot be removed."""
+    from .strategies.custom import StrategyCheckError
+    from .strategies.custom import remove_strategy as uninstall
+
+    try:
+        emit(uninstall(name))
+    except StrategyCheckError as exc:
+        emit({"error": "validation_error", "details": exc.details})
+        raise typer.Exit(EXIT_VALIDATION) from None
+
+
+@app.command()
+def compare(
+    job_ids: list[str] = typer.Argument(..., help="Jobs to compare. A batch or sweep parent expands into its runs."),
+    sort_by: str = typer.Option("sharpe", "--sort-by", help="sharpe, total_return, return_over_drawdown, max_drawdown, win_rate or trade_count."),
+    workspace: str = typer.Option(None, "--workspace"),
+) -> None:
+    """Rank finished runs side by side. Exit 3 if any is still running, 4 if none finished."""
+    from .jobs.state import StateStore
+    from .reporting.compare import SORT_KEYS
+    from .reporting.compare import compare as compare_runs
+    from .reporting.writer import ResultWriter
+
+    if sort_by not in SORT_KEYS:
+        emit({"error": "validation_error", "details": [f"--sort-by must be one of {', '.join(SORT_KEYS)}"]})
+        raise typer.Exit(EXIT_VALIDATION)
+
+    settings = _settings(workspace)
+    store = StateStore(settings)
+    writer = ResultWriter(settings)
+    summaries: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    for job_id in dict.fromkeys(job_ids):
+        record = store.read(job_id)
+        if record is None:
+            unknown.append(job_id)
+            continue
+        phase = record.get("phase")
+        if phase not in TERMINAL_PHASES:
+            pending.append({"job_id": job_id, "phase": phase, "progress_pct": record.get("progress_pct")})
+        elif phase == "failed":
+            failed.append({"job_id": job_id, "error": record.get("error")})
+        else:
+            summary = writer.summary(job_id)
+            if summary is None:
+                failed.append({"job_id": job_id, "error": {"code": "missing_results"}})
+            else:
+                summaries.append(summary)
+                failed += summary.get("failed_children") or []
+
+    emit({**compare_runs(summaries, sort_by), "pending": pending, "failed": failed, "unknown": unknown})
+    if pending:
+        raise typer.Exit(EXIT_PENDING)
+    if not summaries:
+        raise typer.Exit(EXIT_FAILED)
 
 
 def main() -> None:

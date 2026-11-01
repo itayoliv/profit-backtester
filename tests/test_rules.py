@@ -105,6 +105,43 @@ def test_engines_produce_no_violations(intraday_frame, engine_name):
     }
 
 
+def test_vectorbt_buys_whole_shares_unless_fractional_is_allowed():
+    index = pd.date_range("2024-01-02", periods=4, freq="D", tz="UTC")
+    index.name = "timestamp"
+    close = pd.Series([176.0, 176.0, 180.0, 180.0], index=index)
+    frame = pd.DataFrame(
+        {
+            "open": close,
+            "high": close,
+            "low": close,
+            "close": close,
+            "volume": 1e5,
+            "is_last_bar_of_day": False,
+        },
+        index=index,
+    )
+    signals = Signals(
+        entries=pd.Series([True, False, False, False], index=index),
+        exits=pd.Series([False, False, True, False], index=index),
+    )
+
+    def run(fractional: bool):
+        return get_engine("vectorbt").run(
+            frame=frame,
+            signals=signals,
+            capital=CapitalConfig(
+                initial_cash=500, size_value=0.9, slippage_bps=0, allow_fractional=fractional
+            ),
+            rules=RuleConfig(),
+            bars_per_year=252,
+            symbol="TEST",
+        )
+
+    # 90% of $500 at $176 is 2.55 shares, which rounds down to 2.
+    assert run(False).trades["size"].iloc[0] == 2
+    assert run(True).trades["size"].iloc[0] == pytest.approx(2.5568, abs=1e-3)
+
+
 def test_validator_catches_an_overnight_hold():
     rules = RuleConfig(no_overnight=True)
     trades = pd.DataFrame(

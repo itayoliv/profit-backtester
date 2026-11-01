@@ -10,9 +10,14 @@ from pydantic import BaseModel, ConfigDict
 
 
 class StrategyParams(BaseModel):
-    """Base for per-strategy parameter models. Unknown keys are rejected."""
+    """Base for per-strategy parameter models. Unknown keys are rejected.
 
-    model_config = ConfigDict(extra="forbid")
+    The docstring under each field becomes its ``description`` in ``bt strategies``,
+    which is the only place an agent learns what a parameter does. Write one for every
+    field, and say what changing it does to trading, not just its range.
+    """
+
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
 
 
 @dataclass
@@ -57,6 +62,8 @@ class BaseStrategy:
     """
 
     name: ClassVar[str] = ""
+    description: ClassVar[str] = ""
+    """One or two sentences: when it enters, when it exits. Shown by ``bt strategies``."""
     Params: ClassVar[type[StrategyParams]] = StrategyParams
 
     def generate_signals(self, df: pd.DataFrame, params: StrategyParams) -> Signals:
@@ -67,3 +74,10 @@ class BaseStrategy:
 
     def params_schema(self) -> dict:
         return self.Params.model_json_schema()
+
+    def describe(self) -> dict:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "params_schema": self.params_schema(),
+        }

@@ -56,7 +56,7 @@ flowchart LR
 | --- | --- |
 | `backtester/data/` | timeframes, the Alpaca client, the Parquet cache, the delta-merging `DataManager` |
 | `backtester/pipeline/` | request schema, session columns, filters, rules, the staged pipeline, engine adapters |
-| `backtester/strategies/` | the strategy interface, registry and `sma_cross` |
+| `backtester/strategies/` | the strategy interface, registry, `sma_cross` and `macd_cross` |
 | `backtester/jobs/` | the file queue, job state and the worker |
 | `backtester/reporting/` | `summary.json`, `trades.*`, `equity.parquet` and `report.md` |
 | `gui/` | the Streamlit GUI (git-ignored) |
@@ -71,7 +71,12 @@ flowchart LR
 | `bt status [--job-id ID]` | the whole queue, or one job |
 | `bt results <id>` | a finished job's summary and file paths |
 | `bt fetch AAPL,MSFT --start ... --end ...` | warm the cache without backtesting |
-| `bt strategies` | registered strategies and their parameter schemas |
+| `bt strategies` | registered strategies, what they do, and what each parameter means |
+| `bt compare <id> [<id> ...]` | rank finished runs side by side (`--sort-by sharpe`) |
+
+Set `params_grid` in a request to sweep parameters: `{"fast": [8, 12], "slow": [21, 26]}`
+queues one child job per combination, and the parent's results rank them. See
+[examples/sweep_macd.json](examples/sweep_macd.json).
 
 [AGENTS.md](AGENTS.md) is the contract the agent follows: exit codes, the request
 schema, phases, error codes and stuck-job handling.
@@ -81,6 +86,10 @@ schema, phases, error codes and stuck-job handling.
 Subclass `BaseStrategy`, declare a `StrategyParams` model, return `Signals`, and call
 `register()`. See [backtester/strategies/sma_cross.py](backtester/strategies/sma_cross.py).
 Both engines pick it up with no further work.
+
+Set the class's `description`, and put a docstring under every parameter field. Those
+become the `description`s in `bt strategies`, which is how the agent learns what a
+parameter does; a test fails if any field is left without one.
 
 ## Tests
 

@@ -1,0 +1,20 @@
+{
+  "source": "agent",
+  "tickers": ["AAPL"],
+  "timeframe": "1Day",
+  "start": "2021-01-01",
+  "end": "2024-01-01",
+  "strategy": "macd_cross",
+  "params": {"fast": 12, "slow": 26, "signal_len": 9, "stop_pct": 5, "target_pct": 0},
+  "engine": "vectorbt",
+  "capital": {
+    "initial_cash": 100000,
+    "sizing": "percent_equity",
+    "size_value": 1.0,
+    "commission": 0.0,
+    "slippage_bps": 1,
+    "allow_short": false
+  },
+  "rules": {"max_trades_per_day": null, "no_overnight": false},
+  "filters": {"weekdays": null, "regime": null}
+}

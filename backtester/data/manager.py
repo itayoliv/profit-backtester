@@ -30,6 +30,42 @@ class BarsResult:
     coverage: dict[str, Any] = field(default_factory=dict)
 
 
+def session_aligned_hours(frame: pd.DataFrame) -> pd.DataFrame:
+    """Regular-session hourly bars opening at 09:30, 10:30, ... 15:30 New York time.
+
+    The 15:30 bar covers only the last half hour, matching TradingView's exchange-aligned
+    hourly chart. Pre- and post-market rows are dropped.
+    """
+    if frame.empty:
+        return frame
+    local = frame.index.tz_convert("America/New_York")
+    minutes = local.hour * 60 + local.minute
+    keep = (minutes >= 570) & (minutes < 960)
+    frame, local, minutes = frame[keep], local[keep], minutes[keep]
+    if frame.empty:
+        return frame
+    opens = pd.DatetimeIndex(local.normalize()) + pd.to_timedelta(
+        570 + ((minutes - 570) // 60) * 60, unit="min"
+    )
+    weighted = (frame["vwap"] * frame["volume"]).rename("pv")
+    grouped = pd.concat([frame, weighted], axis=1).groupby(opens)
+    volume = grouped["volume"].sum(min_count=1)
+    out = pd.DataFrame(
+        {
+            "open": grouped["open"].first(),
+            "high": grouped["high"].max(),
+            "low": grouped["low"].min(),
+            "close": grouped["close"].last(),
+            "volume": volume,
+            "trade_count": grouped["trade_count"].sum(min_count=1),
+            "vwap": grouped["pv"].sum(min_count=1) / volume,
+        }
+    )
+    out.index = pd.DatetimeIndex(out.index).tz_convert("UTC")
+    out.index.name = "timestamp"
+    return out
+
+
 def to_utc(value: Any) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     return ts.tz_localize("UTC") if ts.tz is None else ts.tz_convert("UTC")
@@ -56,6 +92,35 @@ class DataManager:
         reporter: ProgressReporter | None = None,
     ) -> BarsResult:
         spec = timeframe if isinstance(timeframe, TimeframeSpec) else get_timeframe(timeframe)
+        if spec.name != "1Hour":
+            return self._get_native(symbol, spec, start, end, reporter, spec.name)
+        # Alpaca's hourly bars start on the hour, so the 09:30-10:00 open would be lost.
+        source = self._get_native(symbol, get_timeframe("15Min"), start, end, reporter, spec.name)
+        frame = session_aligned_hours(source.frame)
+        if frame.empty:
+            raise NoDataError(
+                f"{source.coverage['symbol']}: no regular-session 1Hour bars between "
+                f"{start} and {end} on the {source.coverage['feed']} feed"
+            )
+        coverage = {
+            **source.coverage,
+            "timeframe": spec.name,
+            "built_from": "15Min",
+            "first_bar": iso(frame.index[0].to_pydatetime()),
+            "last_bar": iso(frame.index[-1].to_pydatetime()),
+            "bar_count": int(len(frame)),
+        }
+        return BarsResult(frame=frame, coverage=coverage)
+
+    def _get_native(
+        self,
+        symbol: str,
+        spec: TimeframeSpec,
+        start: Any,
+        end: Any,
+        reporter: ProgressReporter | None,
+        label: str,
+    ) -> BarsResult:
         symbol = symbol.strip().upper()
         req_start = to_utc(start)
         req_end = min(to_utc(end), pd.Timestamp.now(tz="UTC"))
@@ -88,7 +153,7 @@ class DataManager:
 
         if frame.empty:
             raise NoDataError(
-                f"{symbol}: no {spec.name} bars between {req_start.date()} and {req_end.date()} "
+                f"{symbol}: no {label} bars between {req_start.date()} and {req_end.date()} "
                 f"on the {key.feed} feed"
             )
 

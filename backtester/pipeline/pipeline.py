@@ -11,7 +11,7 @@ from ..config import Settings
 from ..data.manager import DataManager
 from ..data.progress import ProgressReporter
 from ..data.timeframes import get_timeframe
-from ..strategies.registry import get_strategy
+from ..strategies.registry import get_strategy, strategy_origin
 from .engines import get_engine
 from .filters import build_tradable_mask
 from .request import BacktestRequest
@@ -57,6 +57,8 @@ class Pipeline:
             frame, request.filters, self.data, request.start_ts, request.end_ts
         )
         frame["tradable"] = tradable
+        # Pre- and post-market bars must not feed indicators or fill exits.
+        frame = frame[frame["in_session"].astype(bool)]
         if counts["tradable"] == 0:
             notes.append("No bars passed the filters, so no entry could be taken.")
 
@@ -82,9 +84,16 @@ class Pipeline:
             )
         if spec.name == "1Hour":
             notes.append(
-                "Hourly bars are labelled by open time, so the 09:00 ET bar is excluded; "
-                "the tradable session runs 10:00 to 15:00 and EOD exits fill at the "
-                "15:00 bar's close."
+                "Hourly bars are built from 15Min bars aligned to the 09:30 ET open; "
+                "they open at 09:30 through 15:30 (the last is a half hour) and EOD "
+                "exits fill at the 16:00 close."
+            )
+        origin = strategy_origin(request.strategy)
+        if origin and origin["origin"] == "custom":
+            notes.append(
+                f"{request.strategy} was written by {origin['author']} and added with "
+                f"bt add-strategy ({origin['file']}, sha256 "
+                f"{str(origin['sha256'])[:12]}); it is not one of the built-in strategies."
             )
         if request.rules.no_overnight and not spec.intraday:
             notes.append(
@@ -96,6 +105,7 @@ class Pipeline:
             "parent_job_id": request.parent_job_id,
             "tickers": [symbol],
             "strategy": request.strategy,
+            "strategy_origin": origin,
             "engine": request.engine,
             "params": params.model_dump(),
             "rules": request.rules.model_dump(),

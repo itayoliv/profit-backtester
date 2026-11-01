@@ -88,12 +88,14 @@ class BacktestingEngine:
 
         empty = np.zeros(len(data), dtype=bool)
         strategy = _build_strategy(capital)
+        # backtesting.py's ``spread`` is charged on entry only, so slippage is charged as
+        # a per-side fee instead, which matches vectorbt's slipped entry and exit prices.
+        slippage = capital.slippage_bps / 10_000.0
         backtest = Backtest(
             data,
             strategy,
             cash=capital.initial_cash,
-            commission=capital.commission,
-            spread=capital.slippage_bps / 10_000.0,
+            commission=capital.commission + slippage,
             trade_on_close=True,
             finalize_trades=True,
         )
@@ -112,7 +114,7 @@ class BacktestingEngine:
             ),
         )
 
-        trades = self._trades(stats, frame, signals, rules, symbol)
+        trades = self._trades(stats, frame, signals, rules, symbol, slippage)
         equity = stats["_equity_curve"]["Equity"].astype("float64")
         equity.name = "equity"
         return EngineResult(
@@ -123,7 +125,12 @@ class BacktestingEngine:
 
     @staticmethod
     def _trades(
-        stats, frame: pd.DataFrame, signals: Signals, rules: RuleConfig, symbol: str
+        stats,
+        frame: pd.DataFrame,
+        signals: Signals,
+        rules: RuleConfig,
+        symbol: str,
+        slippage: float,
     ) -> pd.DataFrame:
         records = stats["_trades"]
         if records is None or len(records) == 0:
@@ -138,14 +145,16 @@ class BacktestingEngine:
                                                     and signals.short_exits.get(final_bar, False))
         )
         still_open = exit_time.eq(final_bar) & (not closed_by_signal)
+        # Report the slipped fill prices; PnL already carries slippage as a fee.
+        direction = np.sign(records["Size"].to_numpy())
         out = pd.DataFrame(
             {
                 "entry_time": pd.to_datetime(records["EntryTime"], utc=True),
                 "exit_time": exit_time,
                 "side": np.where(records["Size"].to_numpy() >= 0, "long", "short"),
                 "size": records["Size"].abs(),
-                "entry_price": records["EntryPrice"],
-                "exit_price": records["ExitPrice"],
+                "entry_price": records["EntryPrice"] * (1 + direction * slippage),
+                "exit_price": records["ExitPrice"] * (1 - direction * slippage),
                 "pnl": records["PnL"],
                 "return_pct": records["ReturnPct"],
             }

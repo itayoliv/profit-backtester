@@ -115,6 +115,66 @@ def test_strategies_lists_the_builtin(settings):
     assert "sma_cross" in names
 
 
+def test_every_strategy_and_parameter_is_described(settings):
+    """The agent only learns what a parameter does from these descriptions."""
+    for strategy in payload_of(invoke(settings, "strategies"))["strategies"]:
+        assert strategy["description"], strategy["name"]
+        for name, field in strategy["params_schema"]["properties"].items():
+            assert field.get("description"), f"{strategy['name']}.{name} has no description"
+
+
+def test_submit_reports_sweep_size_and_skips(settings, tmp_path):
+    path = write_request(
+        tmp_path, job_id="grid", params={}, params_grid={"fast": [5, 30], "slow": [20, 50]}
+    )
+    body = payload_of(invoke(settings, "submit", str(path)))
+
+    assert body["children"] == 3
+    assert body["param_sets"] == 3
+    assert body["skipped_combinations"][0]["params"] == {"fast": 30, "slow": 20}
+
+
+def test_compare_exit_codes(settings, tmp_path):
+    assert invoke(settings, "compare", "never-existed").exit_code == 4
+    invoke(settings, "submit", str(write_request(tmp_path, job_id="waiting")))
+    assert invoke(settings, "compare", "waiting").exit_code == 3
+    assert invoke(settings, "compare", "waiting", "--sort-by", "luck").exit_code == 2
+
+
+@pytest.mark.slow
+def test_sweep_then_compare(settings, tmp_path):
+    seed_cache(settings, "AAPL")
+    path = write_request(
+        tmp_path, job_id="sweep", params={}, params_grid={"fast": [3, 5], "slow": [20, 40]}
+    )
+    assert invoke(settings, "submit", str(path)).exit_code == 0
+
+    Worker(settings).run(once=True)
+
+    body = payload_of(invoke(settings, "results", "sweep"))
+    assert "summary" in body, payload_of(invoke(settings, "status", "--job-id", "sweep"))
+    summary = body["summary"]
+    assert summary["params_grid"] == {"fast": [3, 5], "slow": [20, 40]}
+    assert len(summary["comparison"]["rows"]) == 4
+    report = (settings.result_dir("sweep") / "report.md").read_text(encoding="utf-8")
+    assert "Per-run results" in report
+
+    result = invoke(settings, "compare", "sweep", "--sort-by", "total_return")
+    assert result.exit_code == 0
+    body = payload_of(result)
+    rows = body["rows"]
+    assert [r["rank"] for r in rows] == [1, 2, 3, 4]
+    returns = [r["total_return"] for r in rows]
+    assert returns == sorted(returns, reverse=True)
+    assert body["varied"] == ["params.fast", "params.slow"]
+    assert {r["job_id"] for r in rows} == {
+        "sweep-fast3_slow20",
+        "sweep-fast3_slow40",
+        "sweep-fast5_slow20",
+        "sweep-fast5_slow40",
+    }
+
+
 @pytest.mark.slow
 def test_full_loop_submit_run_results(settings, tmp_path):
     """End to end on cached bars: submit, drain the queue, read the results."""

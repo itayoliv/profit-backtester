@@ -17,8 +17,8 @@ def add_session_columns(frame: pd.DataFrame, spec: TimeframeSpec) -> pd.DataFram
     """Add ``session_date``, ``in_session`` and ``is_last_bar_of_day``.
 
     Bars are labelled by their open time, so an intraday bar counts as in-session when
-    its open falls in [09:30, 16:00). For 1Hour that excludes the 09:00 bar, which
-    straddles the open, making 10:00 the first tradable bar and 15:00 the last.
+    its open falls in [09:30, 16:00). 1Hour bars arrive already aligned to the open, so
+    09:30 is the first tradable bar and 15:30 the last.
     """
     out = frame.copy()
     local = out.index.tz_convert(EXCHANGE_TZ)

@@ -31,6 +31,9 @@ class VectorbtEngine:
         }[capital.sizing]
 
         kwargs = {}
+        if not capital.allow_fractional:
+            # Round the share count down to whole shares, on every sizing mode.
+            kwargs["size_granularity"] = 1.0
         if capital.allow_short:
             kwargs["short_entries"] = signals.short_entries
             kwargs["short_exits"] = signals.short_exits
