@@ -14,6 +14,7 @@ from ..data.timeframes import get_timeframe
 from ..strategies.registry import get_strategy, strategy_origin
 from .engines import get_engine
 from .filters import build_tradable_mask
+from .indicators import signals_by_session
 from .request import BacktestRequest
 from .rules import RuleEngine, validate_trades
 from .session import add_session_columns
@@ -63,7 +64,20 @@ class Pipeline:
             notes.append("No bars passed the filters, so no entry could be taken.")
 
         reporter.set_phase("running_strategy")
-        raw_signals = strategy.generate_signals(frame, params)
+        # Default: one continuous regular-session series, same as before this flag.
+        # indicators_rth_only restarts the strategy on each session so a moving
+        # average cannot see the previous day's bars. Extended hours are already
+        # gone, and no_overnight still flattens on the last bar below.
+        if request.rules.indicators_rth_only:
+            raw_signals = signals_by_session(frame, strategy, params)
+            notes.append(
+                "indicators_rth_only is on: indicators are computed on each regular "
+                "session separately (09:30–16:00 ET by bar open), so they do not use "
+                "the previous session. Signals differ from the default continuous "
+                "series. no_overnight still flattens on the last bar of the session."
+            )
+        else:
+            raw_signals = strategy.generate_signals(frame, params)
         signals = RuleEngine(request.rules).apply(frame, raw_signals)
         engine = get_engine(request.engine)
         result = engine.run(
@@ -73,6 +87,8 @@ class Pipeline:
             rules=request.rules,
             bars_per_year=spec.bars_per_year,
             symbol=symbol,
+            stop=request.stop,
+            fill=request.fill,
         )
 
         reporter.set_phase("applying_rules")
@@ -99,6 +115,26 @@ class Pipeline:
             notes.append(
                 "no_overnight on a daily timeframe closes every position on its entry bar."
             )
+        if request.fill == "next_open":
+            notes.append(
+                "fill is next_open: an order decided on a bar's close fills at the next "
+                "bar's open. With no_overnight, an exit that would land in the next "
+                "session fills at the last regular-session bar's close instead, so the "
+                "position does not stay open overnight."
+            )
+        if request.stop is not None:
+            if request.stop.type == "fixed":
+                stop_text = f"fixed ${request.stop.dollars:g} from the entry"
+            else:
+                stop_text = (
+                    f"{request.stop.atr_mult:g} times ATR({request.stop.atr_period}) "
+                    "from the entry"
+                )
+            notes.append(
+                f"Protective stop is on ({stop_text}). It is live after the fill, "
+                "including when no_overnight flattens at the close, and those exits "
+                "are labeled stop."
+            )
 
         summary = {
             "job_id": request.job_id,
@@ -107,6 +143,8 @@ class Pipeline:
             "strategy": request.strategy,
             "strategy_origin": origin,
             "engine": request.engine,
+            "fill": request.fill,
+            "stop": None if request.stop is None else request.stop.model_dump(),
             "params": params.model_dump(),
             "rules": request.rules.model_dump(),
             "filters": request.filters.model_dump(),

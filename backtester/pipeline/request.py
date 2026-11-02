@@ -14,6 +14,8 @@ from ..data.timeframes import TIMEFRAME_NAMES
 
 Engine = Literal["vectorbt", "backtesting"]
 Sizing = Literal["percent_equity", "fixed_cash", "fixed_shares"]
+Fill = Literal["close", "next_open"]
+StopType = Literal["fixed", "atr"]
 
 MAX_GRID_RUNS = 200
 """Upper bound on tickers x parameter combinations in one request."""
@@ -47,6 +49,43 @@ class RuleConfig(BaseModel):
 
     max_trades_per_day: int | None = Field(default=None, ge=1)
     no_overnight: bool = False
+    indicators_rth_only: bool = False
+    """When false (the default), indicators see one continuous regular-session series,
+    which is the historical sample: extended-hours bars are removed first, so a
+    moving average can use the previous session. When true, indicators are rebuilt
+    on each regular session alone (09:30–16:00 ET), so signals can move. Flatten
+    rules are unchanged either way."""
+
+
+class StopConfig(BaseModel):
+    """Protective stop attached by the engines after an entry. Omitted means no stop.
+
+    ``fixed`` sits ``dollars`` under a long entry and the same distance above a
+    short. ``atr`` uses ``atr_mult`` times the Wilder ATR of ``atr_period`` bars.
+    The stop is live once the entry has filled; a hit is labeled ``stop`` on the
+    trade, including when ``no_overnight`` would otherwise flatten at the close.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: StopType
+    atr_mult: float | None = Field(default=None, gt=0)
+    atr_period: int | None = Field(default=None, ge=1, le=2000)
+    dollars: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _matches_type(self) -> "StopConfig":
+        if self.type == "fixed":
+            if self.dollars is None:
+                raise ValueError("fixed stop requires dollars")
+            if self.atr_mult is not None or self.atr_period is not None:
+                raise ValueError("fixed stop does not take atr_mult or atr_period")
+        else:
+            if self.atr_mult is None or self.atr_period is None:
+                raise ValueError("atr stop requires atr_mult and atr_period")
+            if self.dollars is not None:
+                raise ValueError("atr stop does not take dollars")
+        return self
 
 
 class RegimeConfig(BaseModel):
@@ -119,6 +158,12 @@ class BacktestRequest(BaseModel):
     """A parameter sweep: one child job per combination, each merged over ``params``.
     Combinations the strategy rejects (say fast >= slow) are skipped, not fatal."""
     engine: Engine = "vectorbt"
+    fill: Fill = "close"
+    """``close`` fills on the signal bar (historical). ``next_open`` fills the order
+    at the next bar's open. With ``rules.no_overnight``, an exit that would land in
+    the next session fills at the last regular-session bar's close instead."""
+    stop: StopConfig | None = None
+    """Optional protective stop. ``null`` leaves exits entirely to the strategy."""
     capital: CapitalConfig = Field(default_factory=CapitalConfig)
     rules: RuleConfig = Field(default_factory=RuleConfig)
     filters: FilterConfig = Field(default_factory=FilterConfig)

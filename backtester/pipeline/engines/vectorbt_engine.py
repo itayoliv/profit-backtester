@@ -5,7 +5,8 @@ from __future__ import annotations
 import pandas as pd
 
 from ...strategies.base import Signals
-from ..request import CapitalConfig, RuleConfig
+from ..execution import distance_on_entry_bar, resolve_fill, stop_fraction, stops_hit
+from ..request import CapitalConfig, Fill, RuleConfig, StopConfig
 from .base import EngineResult, compute_metrics, exit_reasons, finalise_trades
 
 
@@ -20,9 +21,17 @@ class VectorbtEngine:
         rules: RuleConfig,
         bars_per_year: float,
         symbol: str,
+        stop: StopConfig | None = None,
+        fill: Fill = "close",
     ) -> EngineResult:
         import vectorbt as vbt
-        from vectorbt.portfolio.enums import Direction, SizeType
+        from vectorbt.portfolio.enums import Direction, SizeType, StopEntryPrice, StopExitPrice
+
+        # Close fills keep the original signals so a default request is unchanged.
+        # Next-open moves the order onto the following bar and, with no_overnight,
+        # leaves a last-bar exit on that bar so it cannot spill into the next session.
+        planned, price = resolve_fill(signals, frame, fill, rules)
+        distance = distance_on_entry_bar(frame, stop, fill)
 
         size_type = {
             "percent_equity": SizeType.Percent,
@@ -35,13 +44,26 @@ class VectorbtEngine:
             # Round the share count down to whole shares, on every sizing mode.
             kwargs["size_granularity"] = 1.0
         if capital.allow_short:
-            kwargs["short_entries"] = signals.short_entries
-            kwargs["short_exits"] = signals.short_exits
+            kwargs["short_entries"] = planned.short_entries
+            kwargs["short_exits"] = planned.short_exits
+        if price is not None:
+            kwargs["price"] = price
+        fraction = stop_fraction(frame, distance, fill)
+        if fraction is not None:
+            # Stops read high/low. The fraction is of the fill (FillPrice), so a
+            # fixed dollar stop is that many dollars from the entry when slippage
+            # is zero. StopMarket then applies the same slippage as a signal exit.
+            kwargs["open"] = frame["open"]
+            kwargs["high"] = frame["high"]
+            kwargs["low"] = frame["low"]
+            kwargs["sl_stop"] = fraction
+            kwargs["stop_entry_price"] = StopEntryPrice.FillPrice
+            kwargs["stop_exit_price"] = StopExitPrice.StopMarket
 
         portfolio = vbt.Portfolio.from_signals(
             close=frame["close"],
-            entries=signals.entries,
-            exits=signals.exits,
+            entries=planned.entries,
+            exits=planned.exits,
             init_cash=capital.initial_cash,
             size=capital.size_value,
             size_type=size_type,
@@ -52,7 +74,7 @@ class VectorbtEngine:
             **kwargs,
         )
 
-        trades = self._trades(portfolio, frame, rules, symbol)
+        trades = self._trades(portfolio, frame, rules, symbol, distance)
         equity = portfolio.value()
         equity.name = "equity"
         return EngineResult(
@@ -62,7 +84,7 @@ class VectorbtEngine:
         )
 
     @staticmethod
-    def _trades(portfolio, frame: pd.DataFrame, rules: RuleConfig, symbol: str) -> pd.DataFrame:
+    def _trades(portfolio, frame, rules, symbol, distance) -> pd.DataFrame:
         records = portfolio.trades.records_readable
         if records is None or len(records) == 0:
             return finalise_trades(None, symbol)
@@ -80,7 +102,15 @@ class VectorbtEngine:
                 "return_pct": records["Return"],
             }
         )
-        out["exit_reason"] = exit_reasons(out["exit_time"], still_open, frame, rules)
+        out["exit_reason"] = exit_reasons(
+            out["exit_time"],
+            still_open,
+            frame,
+            rules,
+            stopped=stops_hit(
+                out["entry_time"], out["side"], out["entry_price"], out["exit_price"], distance
+            ),
+        )
         return finalise_trades(out, symbol)
 
 

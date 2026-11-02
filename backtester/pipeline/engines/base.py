@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ...strategies.base import Signals
-from ..request import CapitalConfig, RuleConfig
+from ..request import CapitalConfig, Fill, RuleConfig, StopConfig
 
 ENGINE_NAMES = ("vectorbt", "backtesting")
 
@@ -47,6 +47,8 @@ class Engine(Protocol):
         rules: RuleConfig,
         bars_per_year: float,
         symbol: str,
+        stop: StopConfig | None = None,
+        fill: Fill = "close",
     ) -> EngineResult: ...
 
 
@@ -94,12 +96,17 @@ def exit_reasons(
     still_open: pd.Series,
     frame: pd.DataFrame,
     rules: RuleConfig,
+    stopped: list[bool] | None = None,
 ) -> list[str]:
     last_bar = frame["is_last_bar_of_day"].astype(bool)
     reasons: list[str] = []
-    for exit_time, was_open in zip(exit_times, still_open, strict=True):
+    for i, (exit_time, was_open) in enumerate(zip(exit_times, still_open, strict=True)):
         if bool(was_open) or pd.isna(exit_time):
             reasons.append("end_of_data")
+        elif stopped is not None and stopped[i]:
+            # A stop that trades through on the last bar fills before the close,
+            # so it wins over the end-of-day flatten.
+            reasons.append("stop")
         elif rules.no_overnight and bool(last_bar.get(pd.Timestamp(exit_time), False)):
             reasons.append("eod_close")
         else:

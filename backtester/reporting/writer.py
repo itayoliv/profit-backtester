@@ -104,6 +104,8 @@ class ResultWriter:
                 ("params", summary.get("params")),
                 *([("params_grid", summary["params_grid"])] if summary.get("params_grid") else []),
                 ("engine", summary.get("engine")),
+                ("fill", summary.get("fill", "close")),
+                ("stop", summary.get("stop") or "none"),
                 ("timeframe", coverage.get("timeframe", "n/a")),
                 ("window", f"{coverage.get('requested_start', '?')} to {coverage.get('requested_end', '?')}"),
                 ("initial cash", _num(capital.get("initial_cash"), 2)),
@@ -161,6 +163,7 @@ class ResultWriter:
             [
                 ("max_trades_per_day", rules.get("max_trades_per_day") or "unlimited"),
                 ("no_overnight", bool(rules.get("no_overnight"))),
+                ("indicators_rth_only", bool(rules.get("indicators_rth_only"))),
                 ("rule_violations", summary.get("rule_violations", 0)),
                 ("filters", summary.get("filters")),
             ]

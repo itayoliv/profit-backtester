@@ -57,6 +57,8 @@ Unknown fields are rejected. Only `tickers`, `timeframe`, `start`, `end` and
   "params": {"fast": 10, "slow": 50},
   "params_grid": null,
   "engine": "vectorbt",
+  "fill": "close",
+  "stop": null,
   "capital": {
     "initial_cash": 500,
     "sizing": "percent_equity",
@@ -66,7 +68,7 @@ Unknown fields are rejected. Only `tickers`, `timeframe`, `start`, `end` and
     "allow_short": false,
     "allow_fractional": false
   },
-  "rules": {"max_trades_per_day": null, "no_overnight": false},
+  "rules": {"max_trades_per_day": null, "no_overnight": false, "indicators_rth_only": false},
   "filters": {"weekdays": null, "regime": null}
 }
 ```
@@ -98,6 +100,24 @@ Unknown fields are rejected. Only `tickers`, `timeframe`, `start`, `end` and
   `null` means no cap. Exits are never capped.
 - `rules.no_overnight`: forces an exit on the last bar of each session and blocks
   entries on that bar.
+- `rules.indicators_rth_only`: default false, and that default does not change
+  results. Extended-hours bars are removed before indicators either way (they
+  must not move an average or fill a trade). False then runs the strategy once
+  on the continuous regular-session series, so a moving average can use the
+  previous session. True rebuilds indicators on each regular session alone
+  (09:30–16:00 ET by bar open), which changes entry times. `no_overnight` still
+  flattens on the last bar of the session.
+- `fill`: `close` (default) fills on the signal bar's close, which is what every
+  existing job does. `next_open` fills at the next bar's open. With
+  `no_overnight`, an exit that would land in the next session is filled at the
+  last regular-session bar's close instead, so the position is flat before the
+  session ends and is not held overnight.
+- `stop`: `null` (default) leaves exits to the strategy. `{"type": "fixed",
+  "dollars": 5}` or `{"type": "atr", "atr_mult": 2, "atr_period": 14}` attaches
+  a protective stop on both engines, measured from the fill (below a long, above
+  a short). It is live after the entry, including when `no_overnight` flattens
+  at the close. A hit is `exit_reason` `stop`, ahead of `eod_close`. ATR is
+  Wilder's ATR and uses only bars up to the decision bar.
 - `engine`: `vectorbt` or `backtesting`. Both honour the same rules and report the
   same metric definitions, so results are comparable.
 - `sizing`: `percent_equity` (a fraction of equity, so `size_value` must be at most 1),

@@ -37,6 +37,9 @@ def test_batch_job_id_lists_every_ticker():
     assert request.capital.allow_short is False
     assert request.rules.max_trades_per_day is None
     assert request.rules.no_overnight is False
+    assert request.rules.indicators_rth_only is False
+    assert request.fill == "close"
+    assert request.stop is None
     assert request.filters.weekdays is None
     assert request.filters.regime is None
 
@@ -71,6 +74,11 @@ def test_batch_fans_out_into_named_children():
         ({"capital": {"initial_cash": -5}}, "initial_cash"),
         ({"capital": {"sizing": "percent_equity", "size_value": 2.0}}, "size_value"),
         ({"rules": {"max_trades_per_day": 0}}, "max_trades_per_day"),
+        ({"rules": {"indicators_rth_only": "maybe"}}, "indicators_rth_only"),
+        ({"fill": "mid"}, "fill"),
+        ({"stop": {"type": "fixed"}}, "dollars"),
+        ({"stop": {"type": "atr", "atr_mult": 2}}, "atr_period"),
+        ({"stop": {"type": "trailing", "dollars": 1}}, "type"),
         ({"filters": {"weekdays": [9]}}, "weekdays"),
         ({"unexpected_key": 1}, "unexpected_key"),
     ],

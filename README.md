@@ -43,6 +43,14 @@ flowchart LR
 - **Rules are enforced twice.** `RuleEngine` masks signals before simulation, then
   `validate_trades` re-checks the realised trade log and writes `rule_violations` into
   the summary. Any non-zero value means an engine bug.
+- **Execution flags are opt-in.** Omitting them keeps the historical result:
+  indicators run on the continuous regular-session series, orders fill at the
+  signal bar's close, and there is no protective stop. `rules.indicators_rth_only`
+  rebuilds indicators on each regular session, which changes signals.
+  `fill: "next_open"` fills at the next bar's open, and with `no_overnight` an
+  exit that would spill into the next session flattens at the last regular-session
+  close instead. `stop` (`fixed` dollars or `atr`) is live after entry on both
+  engines and shows up as `exit_reason: stop`.
 - **Filters never drop rows**, because that would corrupt indicator warm-up. They
   produce a boolean `tradable` column that blocks entries only.
 - **Concurrency.** The worker claims jobs by renaming files, which is atomic, and runs
@@ -55,7 +63,7 @@ flowchart LR
 | Path | What it holds |
 | --- | --- |
 | `backtester/data/` | timeframes, the Alpaca client, the Parquet cache, the delta-merging `DataManager` |
-| `backtester/pipeline/` | request schema, session columns, filters, rules, the staged pipeline, engine adapters |
+| `backtester/pipeline/` | request schema, session columns, filters, rules, indicator samples, fill and stop execution, the staged pipeline, engine adapters |
 | `backtester/strategies/` | the strategy interface, registry, `sma_cross` and `macd_cross` |
 | `backtester/jobs/` | the file queue, job state and the worker |
 | `backtester/reporting/` | `summary.json`, `trades.*`, `equity.parquet` and `report.md` |
